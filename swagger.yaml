@@ -1,0 +1,946 @@
+openapi: 3.0.3
+info:
+  title: NexusMail API
+  description: |
+    ## NexusMail – Institutional Mail Management System
+
+    A production-ready REST API for managing institutional mail with a strict 5-role hierarchy and enforced workflow transitions.
+
+    ### Mail Workflow
+    ```
+    Registered → Under Review → Assigned → In Progress → Processed
+    ```
+
+    ### Roles
+    | Role | Capabilities |
+    |------|-------------|
+    | **Admin** | Full system control |
+    | **Director** | Review and assign mail |
+    | **Secretary** | Register mail |
+    | **Professor/Staff** | Track assigned mail |
+    | **Service Lead** | Manage department workflow |
+
+    ### Authentication
+    All protected endpoints require a Bearer token in the `Authorization` header:
+    ```
+    Authorization: Bearer <access_token>
+    ```
+  version: 1.0.0
+  contact:
+    name: NexusMail Support
+    email: support@nexusmail.com
+
+servers:
+  - url: http://localhost:5000/api
+    description: Development server
+
+tags:
+  - name: Auth
+    description: Authentication and token management
+  - name: Users
+    description: User management (Admin only)
+  - name: Departments
+    description: Department management
+  - name: Mail
+    description: Mail lifecycle management
+  - name: Comments
+    description: Mail comment threads
+  - name: Mail Types
+    description: Mail type settings
+  - name: Mail Categories
+    description: Mail category settings with SLA
+  - name: System Config
+    description: Global system configuration
+  - name: Audit Logs
+    description: System audit trail
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    User:
+      type: object
+      properties:
+        _id: { type: string, example: "64f1a2b3c4d5e6f7a8b9c0d1" }
+        name: { type: string, example: "Dr. Ahmed Mansour" }
+        email: { type: string, example: "director@nexusmail.com" }
+        role:
+          type: string
+          enum: [Admin, Director, Secretary, Professor, Service Lead]
+        departmentId:
+          type: object
+          properties:
+            _id: { type: string }
+            name: { type: string }
+        isActive: { type: boolean }
+        lastLogin: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+
+    Department:
+      type: object
+      properties:
+        _id: { type: string }
+        name: { type: string, example: "Academic Affairs" }
+        description: { type: string }
+        parentId: { type: object, nullable: true }
+        headUserId: { type: object, nullable: true }
+        isActive: { type: boolean }
+        createdAt: { type: string, format: date-time }
+
+    Mail:
+      type: object
+      properties:
+        _id: { type: string }
+        referenceNumber: { type: string, example: "NM-202501-00001" }
+        subject: { type: string }
+        sender: { type: string }
+        type:
+          type: string
+          enum: [Incoming, Outgoing, Internal]
+        category: { type: object, nullable: true }
+        priority:
+          type: string
+          enum: [Low, Medium, High, Urgent]
+        status:
+          type: string
+          enum: [Registered, Under Review, Assigned, In Progress, Processed]
+        assignedTo: { type: object, nullable: true }
+        assignedDepartment: { type: object, nullable: true }
+        createdBy: { type: object }
+        instructions: { type: string, nullable: true }
+        pdfUrl: { type: string, nullable: true }
+        aiSummary: { type: string, nullable: true }
+        aiSuggestedDepartment: { type: string, nullable: true }
+        aiConfidenceScore: { type: number, minimum: 0, maximum: 1, nullable: true }
+        slaDeadline: { type: string, format: date-time, nullable: true }
+        isOverdue: { type: boolean }
+        statusHistory:
+          type: array
+          items:
+            type: object
+            properties:
+              status: { type: string }
+              changedBy: { type: object }
+              changedAt: { type: string, format: date-time }
+              note: { type: string }
+        createdAt: { type: string, format: date-time }
+
+    MailComment:
+      type: object
+      properties:
+        _id: { type: string }
+        mailId: { type: string }
+        userId: { type: object }
+        message: { type: string }
+        isInternal: { type: boolean }
+        createdAt: { type: string, format: date-time }
+
+    MailCategory:
+      type: object
+      properties:
+        _id: { type: string }
+        name: { type: string }
+        maxProcessingTime: { type: integer, description: "Days for SLA calculation" }
+        description: { type: string }
+        isActive: { type: boolean }
+
+    MailType:
+      type: object
+      properties:
+        _id: { type: string }
+        name: { type: string }
+        description: { type: string }
+        isActive: { type: boolean }
+
+    SystemConfig:
+      type: object
+      properties:
+        _id: { type: string }
+        institutionName: { type: string }
+        logoUrl: { type: string, nullable: true }
+        globalTimeout: { type: integer, description: "Default SLA timeout in days" }
+        allowSelfRegistration: { type: boolean }
+        maintenanceMode: { type: boolean }
+
+    AuditLog:
+      type: object
+      properties:
+        _id: { type: string }
+        userId: { type: object }
+        userEmail: { type: string }
+        action:
+          type: string
+          enum: [CREATE, UPDATE, DELETE, LOGIN, LOGOUT, ASSIGN, STATUS_CHANGE]
+        entity: { type: string }
+        entityId: { type: string }
+        changes: { type: object }
+        ipAddress: { type: string }
+        timestamp: { type: string, format: date-time }
+
+    PaginatedResponse:
+      type: object
+      properties:
+        success: { type: boolean }
+        message: { type: string }
+        data: { type: array }
+        meta:
+          type: object
+          properties:
+            total: { type: integer }
+            page: { type: integer }
+            limit: { type: integer }
+            totalPages: { type: integer }
+
+    ErrorResponse:
+      type: object
+      properties:
+        success: { type: boolean, example: false }
+        message: { type: string }
+        errors:
+          type: array
+          nullable: true
+          items:
+            type: object
+            properties:
+              field: { type: string }
+              message: { type: string }
+
+security:
+  - BearerAuth: []
+
+paths:
+
+  # ── AUTH ────────────────────────────────────────────────────────────────────
+
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Register a new user
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email, password, role]
+              properties:
+                name: { type: string, example: "Sara El-Amin" }
+                email: { type: string, example: "sara@nexusmail.com" }
+                password: { type: string, example: "Password@123" }
+                role:
+                  type: string
+                  enum: [Admin, Director, Secretary, Professor, Service Lead]
+                departmentId: { type: string, nullable: true }
+      responses:
+        '201':
+          description: User registered successfully
+        '409':
+          description: Email already in use
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Login and receive tokens
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, example: "admin@nexusmail.com" }
+                password: { type: string, example: "Admin@123456" }
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      user: { $ref: '#/components/schemas/User' }
+                      accessToken: { type: string }
+                      refreshToken: { type: string }
+        '401':
+          description: Invalid credentials
+
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Refresh access token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken: { type: string }
+      responses:
+        '200':
+          description: Tokens refreshed
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Logout and invalidate refresh token
+      responses:
+        '200':
+          description: Logged out successfully
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Get current authenticated user
+      responses:
+        '200':
+          description: Current user data
+
+  # ── USERS ────────────────────────────────────────────────────────────────────
+
+  /users:
+    get:
+      tags: [Users]
+      summary: List all users (Admin only)
+      parameters:
+        - in: query
+          name: page
+          schema: { type: integer, default: 1 }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 10 }
+        - in: query
+          name: role
+          schema:
+            type: string
+            enum: [Admin, Director, Secretary, Professor, Service Lead]
+        - in: query
+          name: search
+          schema: { type: string }
+        - in: query
+          name: isActive
+          schema: { type: boolean }
+      responses:
+        '200':
+          description: Paginated user list
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaginatedResponse' }
+
+    post:
+      tags: [Users]
+      summary: Create a new user (Admin only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email, password, role]
+              properties:
+                name: { type: string }
+                email: { type: string }
+                password: { type: string }
+                role:
+                  type: string
+                  enum: [Admin, Director, Secretary, Professor, Service Lead]
+                departmentId: { type: string }
+      responses:
+        '201':
+          description: User created
+
+  /users/{id}:
+    get:
+      tags: [Users]
+      summary: Get user by ID (Admin only)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: User found
+        '404':
+          description: User not found
+
+    put:
+      tags: [Users]
+      summary: Update user (Admin only)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                email: { type: string }
+                role:
+                  type: string
+                  enum: [Admin, Director, Secretary, Professor, Service Lead]
+                departmentId: { type: string }
+                isActive: { type: boolean }
+      responses:
+        '200':
+          description: User updated
+
+    delete:
+      tags: [Users]
+      summary: Delete user (Admin only)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: User deleted
+
+  # ── DEPARTMENTS ──────────────────────────────────────────────────────────────
+
+  /departments:
+    get:
+      tags: [Departments]
+      summary: List all departments
+      responses:
+        '200':
+          description: Department list
+
+    post:
+      tags: [Departments]
+      summary: Create department (Admin only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, example: "Research & Development" }
+                description: { type: string }
+                parentId: { type: string, nullable: true }
+                headUserId: { type: string, nullable: true }
+      responses:
+        '201':
+          description: Department created
+
+  /departments/{id}:
+    get:
+      tags: [Departments]
+      summary: Get department by ID
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Department found
+
+    put:
+      tags: [Departments]
+      summary: Update department (Admin only)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                description: { type: string }
+                parentId: { type: string }
+                headUserId: { type: string }
+                isActive: { type: boolean }
+      responses:
+        '200':
+          description: Department updated
+
+    delete:
+      tags: [Departments]
+      summary: Delete department (Admin only)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Department deleted
+
+  # ── MAIL ─────────────────────────────────────────────────────────────────────
+
+  /mails:
+    get:
+      tags: [Mail]
+      summary: List mails with filters and pagination
+      parameters:
+        - in: query
+          name: page
+          schema: { type: integer, default: 1 }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 10 }
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [Registered, Under Review, Assigned, In Progress, Processed]
+        - in: query
+          name: type
+          schema:
+            type: string
+            enum: [Incoming, Outgoing, Internal]
+        - in: query
+          name: priority
+          schema:
+            type: string
+            enum: [Low, Medium, High, Urgent]
+        - in: query
+          name: isOverdue
+          schema: { type: boolean }
+        - in: query
+          name: search
+          schema: { type: string, description: "Search in subject, sender, reference number" }
+        - in: query
+          name: from
+          schema: { type: string, format: date }
+        - in: query
+          name: to
+          schema: { type: string, format: date }
+        - in: query
+          name: sortBy
+          schema:
+            type: string
+            enum: [createdAt, updatedAt, priority, slaDeadline]
+        - in: query
+          name: sortOrder
+          schema:
+            type: string
+            enum: [asc, desc]
+      responses:
+        '200':
+          description: Paginated mail list
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaginatedResponse' }
+
+    post:
+      tags: [Mail]
+      summary: Register new mail (Secretary/Admin only)
+      description: |
+        Creates a new mail entry. On creation, the AI pipeline runs automatically:
+        - Generates an AI summary
+        - Suggests a department with a confidence score
+        - Calculates the SLA deadline based on category
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [subject, sender, type]
+              properties:
+                subject:
+                  type: string
+                  example: "Request for Faculty Training Budget"
+                sender:
+                  type: string
+                  example: "Ministry of Higher Education"
+                type:
+                  type: string
+                  enum: [Incoming, Outgoing, Internal]
+                  example: "Incoming"
+                category:
+                  type: string
+                  description: "MailCategory ObjectId"
+                priority:
+                  type: string
+                  enum: [Low, Medium, High, Urgent]
+                  default: Medium
+                description:
+                  type: string
+                pdfUrl:
+                  type: string
+                  format: uri
+      responses:
+        '201':
+          description: Mail registered with AI metadata
+
+  /mails/stats:
+    get:
+      tags: [Mail]
+      summary: Get mail statistics by status (Admin/Director only)
+      responses:
+        '200':
+          description: Stats by status
+
+  /mails/{id}:
+    get:
+      tags: [Mail]
+      summary: Get mail by ID
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Mail details
+        '404':
+          description: Not found
+
+  /mails/{id}/status:
+    put:
+      tags: [Mail]
+      summary: Update mail status (validated workflow transitions)
+      description: |
+        **Strict transition rules:**
+        - `Registered` → `Under Review` (Director only)
+        - `Under Review` → `Assigned` (Director only, use /assign endpoint)
+        - `Assigned` → `In Progress` (Assigned user, Director, or Admin)
+        - `In Progress` → `Processed` (Assigned user, Director, or Admin)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [Registered, Under Review, Assigned, In Progress, Processed]
+                note:
+                  type: string
+                  example: "Reviewed and proceeding with assignment"
+      responses:
+        '200':
+          description: Status updated
+        '400':
+          description: Invalid status transition
+
+  /mails/{id}/assign:
+    put:
+      tags: [Mail]
+      summary: Assign mail to a user (Director/Admin only)
+      description: |
+        Mail MUST be in `Under Review` status. Assignment includes mandatory instructions.
+        This automatically transitions the status to `Assigned`.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [assignedTo, instructions]
+              properties:
+                assignedTo:
+                  type: string
+                  description: User ObjectId to assign to
+                instructions:
+                  type: string
+                  minLength: 5
+                  example: "Please review this and prepare a technical report within 5 working days."
+                assignedDepartment:
+                  type: string
+                  description: Department ObjectId
+                priority:
+                  type: string
+                  enum: [Low, Medium, High, Urgent]
+      responses:
+        '200':
+          description: Mail assigned successfully
+        '400':
+          description: Mail not in Under Review status
+
+  /mails/user/{id}:
+    get:
+      tags: [Mail]
+      summary: Get all mails for a specific user (Admin/Director/Service Lead)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+        - in: query
+          name: page
+          schema: { type: integer }
+        - in: query
+          name: limit
+          schema: { type: integer }
+      responses:
+        '200':
+          description: User mails
+
+  # ── COMMENTS ─────────────────────────────────────────────────────────────────
+
+  /mails/{id}/comments:
+    post:
+      tags: [Comments]
+      summary: Add comment to a mail
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message]
+              properties:
+                message:
+                  type: string
+                  example: "I will need additional time to complete the report."
+                isInternal:
+                  type: boolean
+                  default: false
+      responses:
+        '201':
+          description: Comment added
+
+    get:
+      tags: [Comments]
+      summary: Get all comments for a mail
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Comment list
+
+  # ── MAIL TYPES ───────────────────────────────────────────────────────────────
+
+  /mail-types:
+    get:
+      tags: [Mail Types]
+      summary: Get all mail types
+      responses:
+        '200':
+          description: Mail type list
+    post:
+      tags: [Mail Types]
+      summary: Create mail type (Admin only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, example: "Circular" }
+                description: { type: string }
+      responses:
+        '201':
+          description: Created
+
+  /mail-types/{id}:
+    put:
+      tags: [Mail Types]
+      summary: Update mail type (Admin only)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                isActive: { type: boolean }
+      responses:
+        '200':
+          description: Updated
+    delete:
+      tags: [Mail Types]
+      summary: Delete mail type (Admin only)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Deleted
+
+  # ── MAIL CATEGORIES ──────────────────────────────────────────────────────────
+
+  /mail-categories:
+    get:
+      tags: [Mail Categories]
+      summary: Get all mail categories
+      responses:
+        '200':
+          description: Category list
+    post:
+      tags: [Mail Categories]
+      summary: Create mail category (Admin only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, maxProcessingTime]
+              properties:
+                name: { type: string, example: "Urgent Legal" }
+                maxProcessingTime:
+                  type: integer
+                  example: 2
+                  description: "SLA days for this category"
+                description: { type: string }
+      responses:
+        '201':
+          description: Created
+
+  /mail-categories/{id}:
+    put:
+      tags: [Mail Categories]
+      summary: Update mail category (Admin only)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                maxProcessingTime: { type: integer }
+                isActive: { type: boolean }
+      responses:
+        '200':
+          description: Updated
+    delete:
+      tags: [Mail Categories]
+      summary: Delete mail category (Admin only)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Deleted
+
+  # ── SYSTEM CONFIG ─────────────────────────────────────────────────────────────
+
+  /config:
+    get:
+      tags: [System Config]
+      summary: Get system configuration
+      responses:
+        '200':
+          description: System config
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      config: { $ref: '#/components/schemas/SystemConfig' }
+    put:
+      tags: [System Config]
+      summary: Update system configuration (Admin only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                institutionName: { type: string }
+                logoUrl: { type: string }
+                globalTimeout: { type: integer }
+                allowSelfRegistration: { type: boolean }
+                maintenanceMode: { type: boolean }
+      responses:
+        '200':
+          description: Config updated
+
+  # ── AUDIT LOGS ────────────────────────────────────────────────────────────────
+
+  /audit-logs:
+    get:
+      tags: [Audit Logs]
+      summary: Get audit logs (Admin only)
+      parameters:
+        - in: query
+          name: page
+          schema: { type: integer, default: 1 }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 20 }
+        - in: query
+          name: action
+          schema:
+            type: string
+            enum: [CREATE, UPDATE, DELETE, LOGIN, LOGOUT, ASSIGN, STATUS_CHANGE]
+        - in: query
+          name: entity
+          schema: { type: string, example: "Mail" }
+        - in: query
+          name: userId
+          schema: { type: string }
+        - in: query
+          name: from
+          schema: { type: string, format: date }
+        - in: query
+          name: to
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: Paginated audit log list
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaginatedResponse' }

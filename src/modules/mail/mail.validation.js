@@ -1,0 +1,81 @@
+const Joi = require('joi');
+
+const createMailSchema = {
+  body: Joi.object({
+    subject:     Joi.string().min(3).max(300).required(),
+    sender:      Joi.string().min(2).max(200).required(),
+    type:        Joi.string().valid('Incoming', 'Outgoing', 'Internal').required(),
+    category:    Joi.string().hex().length(24).optional().allow(null, ''),
+    priority:    Joi.string().valid('Low', 'Medium', 'High', 'Urgent').default('Medium'),
+    description: Joi.string().max(2000).optional().allow('', null),
+    pdfUrl:      Joi.string().optional().allow('', null),
+  }),
+};
+
+const updateStatusSchema = {
+  body: Joi.object({
+    status: Joi.string()
+      .valid('Registered', 'Under Review', 'Assigned', 'In Progress', 'Processed')
+      .required(),
+    note: Joi.string().max(500).optional().allow('', null),
+  }),
+  params: Joi.object({
+    id: Joi.string().hex().length(24).required(),
+  }),
+};
+
+const assignMailSchema = {
+  body: Joi.object({
+    assignedTo:         Joi.string().hex().length(24).required(),
+    instructions:       Joi.string().max(2000).optional().allow('', null),
+    assignedDepartment: Joi.string().hex().length(24).optional().allow(null, ''),
+    priority:           Joi.string().valid('Low', 'Medium', 'High', 'Urgent').optional(),
+  }),
+  params: Joi.object({
+    id: Joi.string().hex().length(24).required(),
+  }),
+};
+
+const listMailSchema = {
+  query: Joi.object({
+    page:       Joi.number().integer().min(1).default(1),
+    limit:      Joi.number().integer().min(1).max(500).default(10),
+    status:     Joi.string().valid('Registered', 'Under Review', 'Assigned', 'In Progress', 'Processed'),
+    type:       Joi.string().valid('Incoming', 'Outgoing', 'Internal'),
+    priority:   Joi.string().valid('Low', 'Medium', 'High', 'Urgent'),
+    assignedTo: Joi.string().hex().length(24),
+    createdBy:  Joi.string().hex().length(24),
+    category:   Joi.string().hex().length(24),
+    isOverdue:  Joi.boolean(),
+    search:     Joi.string().allow(''),
+    from:       Joi.date().iso(),
+    to:         Joi.date().iso(),
+    sortBy:     Joi.string().valid('createdAt', 'updatedAt', 'priority', 'slaDeadline').default('createdAt'),
+    sortOrder:  Joi.string().valid('asc', 'desc').default('desc'),
+  }),
+};
+
+const mailIdParamSchema = {
+  params: Joi.object({
+    id: Joi.string().hex().length(24).required(),
+  }),
+};
+
+const addCommentSchema = {
+  body: Joi.object({
+    message:    Joi.string().min(1).max(1000).required(),
+    isInternal: Joi.boolean().default(false),
+  }),
+  params: Joi.object({
+    id: Joi.string().hex().length(24).required(),
+  }),
+};
+
+module.exports = {
+  createMailSchema,
+  updateStatusSchema,
+  assignMailSchema,
+  listMailSchema,
+  mailIdParamSchema,
+  addCommentSchema,
+};
