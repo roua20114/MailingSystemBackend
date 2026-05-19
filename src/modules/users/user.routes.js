@@ -14,9 +14,12 @@ const { ROLES } = require('../../utils/constants');
 
 router.use(authMiddleware);
 
-router.get('/', roleMiddleware(ROLES.ADMIN), validate(listUsersSchema), userController.getAllUsers);
+// GET endpoints: Admin + Director (Director needs user lists for assignment dropdowns)
+router.get('/', roleMiddleware(ROLES.ADMIN, ROLES.DIRECTOR), validate(listUsersSchema), userController.getAllUsers);
+router.get('/:id', roleMiddleware(ROLES.ADMIN, ROLES.DIRECTOR), validate(userIdParamSchema), userController.getUserById);
+
+// Write endpoints: Admin only
 router.post('/', roleMiddleware(ROLES.ADMIN), validate(createUserSchema), userController.createUser);
-router.get('/:id', roleMiddleware(ROLES.ADMIN), validate(userIdParamSchema), userController.getUserById);
 router.put('/:id', roleMiddleware(ROLES.ADMIN), validate(updateUserSchema), userController.updateUser);
 router.delete('/:id', roleMiddleware(ROLES.ADMIN), validate(userIdParamSchema), userController.deleteUser);
 

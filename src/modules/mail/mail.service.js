@@ -6,6 +6,7 @@ const AppError = require('../../utils/AppError');
 const { STATUS_TRANSITIONS, MAIL_STATUS, ROLES, AUDIT_ACTIONS } = require('../../utils/constants');
 const { createAuditLog } = require('../../middlewares/audit.middleware');
 const aiService = require('./ai.service');
+const notifService = require('../notifications/notification.service');
 
 const getAllMails = async (query, currentUser) => {
   const {
@@ -31,7 +32,14 @@ const getAllMails = async (query, currentUser) => {
   if (currentUser.role === ROLES.PROFESSOR) {
     filter.assignedTo = currentUser._id;
   } else if (currentUser.role === ROLES.SECRETARY) {
-    filter.createdBy = currentUser._id;
+    // Secretary sees mails they registered OR mails assigned to them by Director
+    filter.$or = [
+      { createdBy: currentUser._id },
+      { assignedTo: currentUser._id },
+    ];
+  } else if (currentUser.role === ROLES.SERVICE_LEAD) {
+    // Service Lead sees mails assigned to them
+    filter.assignedTo = currentUser._id;
   }
 
   if (status) filter.status = status;
@@ -116,6 +124,9 @@ const createMail = async (data, req) => {
 
   const mail = await mailRepository.create(mailData);
 
+  // Notify Directors/Admins of new mail
+  notifService.onMailRegistered(mail, req.user).catch(() => {});
+
   await createAuditLog({
     userId: req.user._id,
     userEmail: req.user.email,
@@ -175,6 +186,15 @@ const updateMailStatus = async (id, { status, note }, req) => {
     $push: { statusHistory: statusEntry },
   });
 
+  // Trigger role-specific notifications
+  if (status === MAIL_STATUS.UNDER_REVIEW) {
+    notifService.onMailUnderReview(mail, req.user).catch(() => {});
+  } else if (status === MAIL_STATUS.IN_PROGRESS) {
+    notifService.onMailInProgress(mail, req.user).catch(() => {});
+  } else if (status === MAIL_STATUS.PROCESSED) {
+    notifService.onMailProcessed(mail, req.user).catch(() => {});
+  }
+
   await createAuditLog({
     userId: req.user._id,
     userEmail: req.user.email,
@@ -222,6 +242,9 @@ const assignMail = async (id, { assignedTo, instructions, assignedDepartment, pr
   };
 
   const updated = await mailRepository.update(id, updateData);
+
+  // Notify the assignee
+  notifService.onMailAssigned(mail, assignee._id, assignee.name, req.user).catch(() => {});
 
   await createAuditLog({
     userId: req.user._id,

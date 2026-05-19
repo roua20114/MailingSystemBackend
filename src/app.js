@@ -14,11 +14,19 @@ const userRoutes = require('./modules/users/user.routes');
 const departmentRoutes = require('./modules/departments/department.routes');
 const mailRoutes = require('./modules/mail/mail.routes');
 const settingsRoutes = require('./modules/settings/settings.routes');
+const notificationRoutes = require('./modules/notifications/notification.routes');
 
 const app = express();
 
 // ── Security ─────────────────────────────────────────────────────────────────
 app.use(helmet());
+
+// Allow PDFs and uploaded files to be opened/rendered in the browser
+app.use('/uploads', (req, res, next) => {
+  res.removeHeader('X-Frame-Options');
+  res.setHeader('Content-Security-Policy', "default-src 'none'; object-src 'self'; plugin-types application/pdf");
+  next();
+});
 app.set('trust proxy', 1);
 
 // ── CORS ──────────────────────────────────────────────────────────────────────
@@ -53,7 +61,7 @@ app.use('/api/auth/login', authLimiter);
 // ── Body Parsing ──────────────────────────────────────────────────────────────
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-app.use('/uploads', require('express').static(require('path').join(__dirname, '../uploads')));
+app.use('/uploads', require('express').static(require('path').join(__dirname, '../../uploads')));
 
 // ── HTTP Logging ──────────────────────────────────────────────────────────────
 if (config.nodeEnv !== 'test') {
@@ -80,6 +88,7 @@ app.use('/api/users', userRoutes);
 app.use('/api/departments', departmentRoutes);
 app.use('/api/mails', mailRoutes);
 app.use('/api', settingsRoutes);
+app.use('/api/notifications', notificationRoutes);
 
 // ── 404 Handler ───────────────────────────────────────────────────────────────
 app.all('*', (req, res, next) => {
