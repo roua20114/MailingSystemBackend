@@ -5,26 +5,48 @@ const findAll = async ({ filter = {}, page = 1, limit = 10, sort = { createdAt: 
   const skip = (page - 1) * limit;
   const [mails, total] = await Promise.all([
     Mail.find(filter)
+      .populate('sender', 'name type email phone')
       .populate('createdBy', 'name email role')
       .populate('assignedTo', 'name email role')
       .populate('assignedDepartment', 'name')
       .populate('category', 'name maxProcessingTime')
       .populate('statusHistory.changedBy', 'name email')
+      .populate('inboxMailId', 'subject referenceNumber type status')
+      // Populate responses virtual so the list knows if a mail has been replied to
+      .populate({
+        path: 'responses',
+        select: '_id subject referenceNumber type status createdAt',
+      })
       .sort(sort)
       .skip(skip)
       .limit(limit),
     Mail.countDocuments(filter),
   ]);
-  return { mails, total };
+
+  // Attach a computed boolean `hasResponse` on each mail for easy frontend use
+  const mailsWithFlag = mails.map((mail) => {
+    const obj = mail.toObject();
+    obj.hasResponse = Array.isArray(obj.responses) && obj.responses.length > 0;
+    return obj;
+  });
+
+  return { mails: mailsWithFlag, total };
 };
 
 const findById = async (id) => {
   return Mail.findById(id)
+    .populate('sender', 'name type email phone')
     .populate('createdBy', 'name email role')
     .populate('assignedTo', 'name email role departmentId')
     .populate('assignedDepartment', 'name')
     .populate('category', 'name maxProcessingTime')
-    .populate('statusHistory.changedBy', 'name email');
+    .populate('statusHistory.changedBy', 'name email')
+    .populate('inboxMailId', 'subject referenceNumber type status createdAt')
+    .populate({
+      path: 'responses',
+      select: 'subject referenceNumber type status createdAt createdBy',
+      populate: { path: 'createdBy', select: 'name email' },
+    });
 };
 
 const create = async (data) => {
@@ -33,10 +55,12 @@ const create = async (data) => {
 
 const update = async (id, data) => {
   return Mail.findByIdAndUpdate(id, data, { new: true, runValidators: true })
+    .populate('sender', 'name type email phone')
     .populate('createdBy', 'name email role')
     .populate('assignedTo', 'name email role')
     .populate('assignedDepartment', 'name')
-    .populate('category', 'name maxProcessingTime');
+    .populate('category', 'name maxProcessingTime')
+    .populate('inboxMailId', 'subject referenceNumber type status');
 };
 
 const remove = async (id) => {
@@ -50,15 +74,25 @@ const findByUser = async (userId, { page = 1, limit = 10 }) => {
   const skip = (page - 1) * limit;
   const [mails, total] = await Promise.all([
     Mail.find(filter)
+      .populate('sender', 'name type email phone')
       .populate('createdBy', 'name email')
       .populate('assignedTo', 'name email')
       .populate('category', 'name')
+      .populate('inboxMailId', 'subject referenceNumber type status')
+      .populate({ path: 'responses', select: '_id' })
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit),
     Mail.countDocuments(filter),
   ]);
-  return { mails, total };
+
+  const mailsWithFlag = mails.map((mail) => {
+    const obj = mail.toObject();
+    obj.hasResponse = Array.isArray(obj.responses) && obj.responses.length > 0;
+    return obj;
+  });
+
+  return { mails: mailsWithFlag, total };
 };
 
 const markOverdueMails = async () => {

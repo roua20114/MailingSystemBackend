@@ -1,6 +1,8 @@
 const mongoose = require('mongoose');
 const { MAIL_STATUS, MAIL_PRIORITY, MAIL_TYPES } = require('../../utils/constants');
 
+require('../senders/sender.model');
+
 const mailSchema = new mongoose.Schema(
   {
     subject: {
@@ -9,9 +11,9 @@ const mailSchema = new mongoose.Schema(
       trim: true,
     },
     sender: {
-      type: String,
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Sender',
       required: [true, 'Sender is required'],
-      trim: true,
     },
     type: {
       type: String,
@@ -62,10 +64,24 @@ const mailSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    // Auto-generated internal reference  e.g. NM-2026-0001
     referenceNumber: {
       type: String,
       unique: true,
       sparse: true,
+    },
+    // Manual reference typed by the secretary from the physical document
+    // e.g. "MIN-2026-123" — kept for administrative traceability
+    manualReference: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+    // Link to the original incoming mail this outgoing mail responds to
+    inboxMailId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Mail',
+      default: null,
     },
     // AI-generated fields
     aiSummary: {
@@ -101,33 +117,30 @@ const mailSchema = new mongoose.Schema(
       },
     ],
   },
-  { timestamps: true }
+  { timestamps: true, toJSON: { virtuals: true }, toObject: { virtuals: true } }
 );
 
-mailSchema.index({ status: 1 });
-mailSchema.index({ createdBy: 1 });
-mailSchema.index({ assignedTo: 1 });
-mailSchema.index({ priority: 1 });
-mailSchema.index({ slaDeadline: 1 });
-
-// Auto-generate reference number
-mailSchema.pre('save', async function (next) {
-  if (this.isNew && !this.referenceNumber) {
-    const date = new Date();
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const count = await this.constructor.countDocuments();
-    this.referenceNumber = `NM-${year}${month}-${String(count + 1).padStart(5, '0')}`;
-  }
-  next();
+// Virtual: all outgoing/internal mails that responded to this mail
+mailSchema.virtual('responses', {
+  ref: 'Mail',
+  localField: '_id',
+  foreignField: 'inboxMailId',
 });
 
-// Check overdue status
+// Instance method: check overdue in memory (does not persist)
 mailSchema.methods.checkOverdue = function () {
-  if (this.slaDeadline && this.status !== 'Processed') {
-    this.isOverdue = new Date() > this.slaDeadline;
+  if (this.slaDeadline && new Date() > this.slaDeadline && this.status !== 'Processed') {
+    this.isOverdue = true;
   }
-  return this.isOverdue;
 };
 
-module.exports = mongoose.model('Mail', mailSchema);
+mailSchema.index({ status: 1 });
+mailSchema.index({ type: 1 });
+mailSchema.index({ createdBy: 1 });
+mailSchema.index({ assignedTo: 1 });
+mailSchema.index({ inboxMailId: 1 });
+mailSchema.index({ manualReference: 1 });
+
+const Mail = mongoose.model('Mail', mailSchema);
+
+module.exports = Mail;

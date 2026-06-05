@@ -14,7 +14,15 @@ const { ROLES } = require('../../utils/constants');
 
 router.use(authMiddleware);
 
-// GET endpoints: Admin + Director (Director needs user lists for assignment dropdowns)
+// ── Notification preferences (tous les utilisateurs connectés) ────────────────
+// ⚠️  Ces routes DOIVENT être déclarées AVANT router.get('/:id')
+//     pour ne pas être interceptées par le param :id
+router.get('/notification-settings', userController.getNotificationSettings);
+router.patch('/notification-settings', userController.updateNotificationSettings);
+
+// ── CRUD Users ────────────────────────────────────────────────────────────────
+
+// GET endpoints: Admin + Director
 router.get('/', roleMiddleware(ROLES.ADMIN, ROLES.DIRECTOR), validate(listUsersSchema), userController.getAllUsers);
 router.get('/:id', roleMiddleware(ROLES.ADMIN, ROLES.DIRECTOR), validate(userIdParamSchema), userController.getUserById);
 

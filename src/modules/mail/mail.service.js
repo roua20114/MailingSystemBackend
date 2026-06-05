@@ -1,12 +1,44 @@
 const mailRepository = require('./mail.repository');
 const MailCategory = require('../settings/mailCategory.model');
 const SystemConfig = require('../settings/systemConfig.model');
+const Mail = require('./mail.model');
 const User = require('../users/user.model');
 const AppError = require('../../utils/AppError');
 const { STATUS_TRANSITIONS, MAIL_STATUS, ROLES, AUDIT_ACTIONS } = require('../../utils/constants');
 const { createAuditLog } = require('../../middlewares/audit.middleware');
 const aiService = require('./ai.service');
 const notifService = require('../notifications/notification.service');
+
+// ── Auto Reference Number Generator ──────────────────────────────────────────
+// Format: NM-YYYY-XXXX  (e.g. NM-2026-0001)
+// Always generated regardless of manualReference.
+const generateReferenceNumber = async () => {
+  const year = new Date().getFullYear();
+  const prefix = `NM-${year}-`;
+
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const latest = await Mail.findOne(
+      { referenceNumber: { $regex: `^${prefix}` } },
+      { referenceNumber: 1 },
+      { sort: { referenceNumber: -1 } }
+    ).lean();
+
+    let nextSeq = 1;
+    if (latest?.referenceNumber) {
+      const parts = latest.referenceNumber.split('-');
+      const lastSeq = parseInt(parts[parts.length - 1], 10);
+      if (!isNaN(lastSeq)) nextSeq = lastSeq + 1;
+    }
+
+    const candidate = `${prefix}${String(nextSeq).padStart(4, '0')}`;
+    const exists = await Mail.exists({ referenceNumber: candidate });
+    if (!exists) return candidate;
+  }
+
+  return `${prefix}${Date.now()}`;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 const getAllMails = async (query, currentUser) => {
   const {
@@ -28,17 +60,14 @@ const getAllMails = async (query, currentUser) => {
 
   const filter = {};
 
-  // Non-admin/director users only see relevant mails
   if (currentUser.role === ROLES.PROFESSOR) {
     filter.assignedTo = currentUser._id;
   } else if (currentUser.role === ROLES.SECRETARY) {
-    // Secretary sees mails they registered OR mails assigned to them by Director
     filter.$or = [
       { createdBy: currentUser._id },
       { assignedTo: currentUser._id },
     ];
   } else if (currentUser.role === ROLES.SERVICE_LEAD) {
-    // Service Lead sees mails assigned to them
     filter.assignedTo = currentUser._id;
   }
 
@@ -52,9 +81,9 @@ const getAllMails = async (query, currentUser) => {
 
   if (search) {
     filter.$or = [
-      { subject: { $regex: search, $options: 'i' } },
-      { sender: { $regex: search, $options: 'i' } },
+      { subject:         { $regex: search, $options: 'i' } },
       { referenceNumber: { $regex: search, $options: 'i' } },
+      { manualReference: { $regex: search, $options: 'i' } },
     ];
   }
 
@@ -73,7 +102,6 @@ const getMailById = async (id, currentUser) => {
   const mail = await mailRepository.findById(id);
   if (!mail) throw new AppError('Mail not found', 404);
 
-  // Access control: Professors can only view mails assigned to them
   if (
     currentUser.role === ROLES.PROFESSOR &&
     mail.assignedTo?._id.toString() !== currentUser._id.toString()
@@ -81,9 +109,7 @@ const getMailById = async (id, currentUser) => {
     throw new AppError('You do not have access to this mail', 403);
   }
 
-  // Check and update overdue status
   mail.checkOverdue();
-
   return mail;
 };
 
@@ -98,33 +124,59 @@ const createMail = async (data, req) => {
     categoryMaxDays = cat.maxProcessingTime;
   }
 
-  // Get system config for global timeout
-  const config = await SystemConfig.getConfig();
+  // Validate inboxMailId: must exist and must be an Incoming mail
+  if (data.inboxMailId) {
+    const parentMail = await Mail.findById(data.inboxMailId);
+    if (!parentMail) {
+      throw new AppError('Referenced inbox mail (inboxMailId) not found', 404);
+    }
+    if (parentMail.type !== 'Incoming') {
+      throw new AppError('inboxMailId must reference an Incoming mail', 400);
+    }
+  }
 
-  // Run AI processing pipeline
+  // Always auto-generate the internal reference number (NM-YYYY-XXXX)
+  const referenceNumber = await generateReferenceNumber();
+
+  // Keep manualReference as-is (optional, for administrative traceability)
+  // Both fields coexist independently on the document
+  const manualReference =
+    data.manualReference && data.manualReference.trim() !== ''
+      ? data.manualReference.trim()
+      : null;
+
+  const config = await SystemConfig.getConfig();
   const aiResult = aiService.processNewMail(data, categoryMaxDays, config.globalTimeout);
 
   const mailData = {
-    ...data,
+    subject:              data.subject,
+    sender:               data.sender,
+    type:                 data.type,
+    category:             data.category || null,
+    priority:             data.priority || 'Medium',
+    description:          data.description || null,
+    pdfUrl:               data.pdfUrl || null,
+    inboxMailId:          data.inboxMailId || null,
+    referenceNumber,
+    manualReference,
     createdBy,
     status: MAIL_STATUS.REGISTERED,
-    aiSummary: aiResult.aiSummary,
+    aiSummary:            aiResult.aiSummary,
     aiSuggestedDepartment: aiResult.aiSuggestedDepartment,
-    aiConfidenceScore: aiResult.aiConfidenceScore,
-    slaDeadline: aiResult.slaDeadline,
+    aiConfidenceScore:    aiResult.aiConfidenceScore,
+    slaDeadline:          aiResult.slaDeadline,
     statusHistory: [
       {
         status: MAIL_STATUS.REGISTERED,
         changedBy: createdBy,
         changedAt: new Date(),
-        note: 'Mail registered by secretary',
+        note: `Mail registered by ${req.user.role}`,
       },
     ],
   };
 
   const mail = await mailRepository.create(mailData);
 
-  // Notify Directors/Admins of new mail
   notifService.onMailRegistered(mail, req.user).catch(() => {});
 
   await createAuditLog({
@@ -134,9 +186,11 @@ const createMail = async (data, req) => {
     entity: 'Mail',
     entityId: mail._id,
     changes: {
-      subject: mail.subject,
-      type: mail.type,
+      subject:         mail.subject,
+      type:            mail.type,
       referenceNumber: mail.referenceNumber,
+      manualReference: mail.manualReference || null,
+      inboxMailId:     mail.inboxMailId || null,
     },
     req,
   });
@@ -153,22 +207,22 @@ const updateMailStatus = async (id, { status, note }, req) => {
 
   if (!allowedTransitions.includes(status)) {
     throw new AppError(
-      `Invalid status transition from "${currentStatus}" to "${status}". Allowed: ${allowedTransitions.join(', ') || 'none (terminal state)'}`,
+      `Invalid status transition from "${currentStatus}" to "${status}". Allowed: ${
+        allowedTransitions.join(', ') || 'none (terminal state)'
+      }`,
       400
     );
   }
 
-  // Business rule: only Director can move to Under Review
   if (status === MAIL_STATUS.UNDER_REVIEW && req.user.role !== ROLES.DIRECTOR) {
     throw new AppError('Only a Director can move mail to Under Review', 403);
   }
 
-  // Business rule: In Progress can be set by assigned user or Director
   if (status === MAIL_STATUS.IN_PROGRESS) {
     const isAssigned =
       mail.assignedTo && mail.assignedTo._id.toString() === req.user._id.toString();
     const isDirector = req.user.role === ROLES.DIRECTOR;
-    const isAdmin = req.user.role === ROLES.ADMIN;
+    const isAdmin    = req.user.role === ROLES.ADMIN;
     if (!isAssigned && !isDirector && !isAdmin) {
       throw new AppError('Only the assigned user or Director can start progress', 403);
     }
@@ -186,7 +240,6 @@ const updateMailStatus = async (id, { status, note }, req) => {
     $push: { statusHistory: statusEntry },
   });
 
-  // Trigger role-specific notifications
   if (status === MAIL_STATUS.UNDER_REVIEW) {
     notifService.onMailUnderReview(mail, req.user).catch(() => {});
   } else if (status === MAIL_STATUS.IN_PROGRESS) {
@@ -208,11 +261,14 @@ const updateMailStatus = async (id, { status, note }, req) => {
   return updated;
 };
 
-const assignMail = async (id, { assignedTo, instructions, assignedDepartment, priority }, req) => {
+const assignMail = async (
+  id,
+  { assignedTo, instructions, assignedDepartment, priority },
+  req
+) => {
   const mail = await mailRepository.findById(id);
   if (!mail) throw new AppError('Mail not found', 404);
 
-  // Mail must be Under Review to be assigned
   if (mail.status !== MAIL_STATUS.UNDER_REVIEW) {
     throw new AppError(
       `Mail must be in "Under Review" status to be assigned. Current status: "${mail.status}"`,
@@ -220,14 +276,13 @@ const assignMail = async (id, { assignedTo, instructions, assignedDepartment, pr
     );
   }
 
-  // Validate the target user exists
   const assignee = await User.findById(assignedTo);
   if (!assignee) throw new AppError('Assigned user not found', 404);
   if (!assignee.isActive) throw new AppError('Cannot assign to an inactive user', 400);
 
   const updateData = {
     assignedTo,
-    instructions,
+    instructions: instructions || null,
     status: MAIL_STATUS.ASSIGNED,
     ...(assignedDepartment && { assignedDepartment }),
     ...(priority && { priority }),
@@ -236,14 +291,13 @@ const assignMail = async (id, { assignedTo, instructions, assignedDepartment, pr
         status: MAIL_STATUS.ASSIGNED,
         changedBy: req.user._id,
         changedAt: new Date(),
-        note: `Assigned to ${assignee.name} with instructions`,
+        note: `Assigned to ${assignee.name}${instructions ? ' with instructions' : ''}`,
       },
     },
   };
 
   const updated = await mailRepository.update(id, updateData);
 
-  // Notify the assignee
   notifService.onMailAssigned(mail, assignee._id, assignee.name, req.user).catch(() => {});
 
   await createAuditLog({
@@ -253,8 +307,8 @@ const assignMail = async (id, { assignedTo, instructions, assignedDepartment, pr
     entity: 'Mail',
     entityId: id,
     changes: {
-      assignedTo: assignee.email,
-      instructions: instructions.substring(0, 100),
+      assignedTo:   assignee.email,
+      instructions: instructions ? instructions.substring(0, 100) : '',
     },
     req,
   });
@@ -264,7 +318,7 @@ const assignMail = async (id, { assignedTo, instructions, assignedDepartment, pr
 
 const getMailsByUser = async (userId, query) => {
   return mailRepository.findByUser(userId, {
-    page: parseInt(query.page || 1),
+    page:  parseInt(query.page  || 1),
     limit: parseInt(query.limit || 10),
   });
 };
@@ -272,7 +326,6 @@ const getMailsByUser = async (userId, query) => {
 const addComment = async (mailId, userId, { message, isInternal }) => {
   const mail = await mailRepository.findById(mailId);
   if (!mail) throw new AppError('Mail not found', 404);
-
   return mailRepository.addComment({ mailId, userId, message, isInternal: isInternal || false });
 };
 

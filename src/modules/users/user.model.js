@@ -2,6 +2,24 @@ const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 const { ROLES } = require('../../utils/constants');
 
+const notificationPrefsSchema = new mongoose.Schema(
+  {
+    assignedMail: {
+      inApp: { type: Boolean, default: true },
+      email: { type: Boolean, default: true },
+    },
+    slaAlert: {
+      inApp: { type: Boolean, default: true },
+      email: { type: Boolean, default: true },
+    },
+    statusUpdates: {
+      inApp: { type: Boolean, default: true },
+      email: { type: Boolean, default: false },
+    },
+  },
+  { _id: false }
+);
+
 const userSchema = new mongoose.Schema(
   {
     name: {
@@ -43,6 +61,11 @@ const userSchema = new mongoose.Schema(
     },
     lastLogin: {
       type: Date,
+    },
+    // ── Préférences de notifications ──────────────────────────────────────
+    notificationPreferences: {
+      type: notificationPrefsSchema,
+      default: () => ({}),
     },
   },
   { timestamps: true }

@@ -31,7 +31,7 @@ router.get('/', validate(listMailSchema), mailController.getAllMails);
 
 router.post(
   '/',
-  roleMiddleware(ROLES.SECRETARY, ROLES.ADMIN),
+  roleMiddleware(ROLES.DIRECTOR, ROLES.ADMIN, ROLES.SECRETARY),
   validate(createMailSchema),
   mailController.createMail
 );
@@ -71,7 +71,7 @@ router.get(
 );
 
 // ── PDF Upload ────────────────────────────────────────────────────────────────
-router.post('/upload', roleMiddleware(ROLES.SECRETARY, ROLES.ADMIN), (req, res, next) => {
+router.post('/upload', roleMiddleware(ROLES.SECRETARY, ROLES.ADMIN, ROLES.DIRECTOR), (req, res, next) => {
   try {
     const { filename, data, mimeType } = req.body;
     if (!data || !filename) return res.status(400).json({ success: false, message: 'filename and data are required' });
