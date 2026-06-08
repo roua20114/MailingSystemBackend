@@ -146,8 +146,7 @@ const createMail = async (data, req) => {
       : null;
 
   const config = await SystemConfig.getConfig();
-  const aiResult = aiService.processNewMail(data, categoryMaxDays, config.globalTimeout);
-
+  const aiResult = await aiService.processNewMail(data, categoryMaxDays, config.globalTimeout);
   const mailData = {
     subject:              data.subject,
     sender:               data.sender,

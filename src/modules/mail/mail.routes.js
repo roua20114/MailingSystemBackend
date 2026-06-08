@@ -43,6 +43,12 @@ router.get(
 );
 
 router.get('/:id', validate(mailIdParamSchema), mailController.getMailById);
+// ── AI Summarize on demand ────────────────────────────────────────────────────
+router.post(
+  '/:id/summarize',
+  validate(mailIdParamSchema),
+  mailController.summarizeMail
+);
 
 router.put(
   '/:id/status',

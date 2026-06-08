@@ -83,6 +83,17 @@ const getMailStats = async (req, res, next) => {
     next(error);
   }
 };
+const summarizeMail = async (req, res, next) => {
+  try {
+    const mail = await mailService.summarizeMail(req.params.id, req.user);
+    sendSuccess(res, { mail }, 'Résumé généré avec succès');
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Ajoute aussi dans module.exports :
+// summarizeMail,
 
 module.exports = {
   getAllMails,
@@ -94,4 +105,5 @@ module.exports = {
   addComment,
   getComments,
   getMailStats,
+  summarizeMail,
 };
