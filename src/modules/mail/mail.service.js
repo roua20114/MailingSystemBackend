@@ -1,8 +1,14 @@
+const mongoose = require('mongoose');
 const mailRepository = require('./mail.repository');
 const MailCategory = require('../settings/mailCategory.model');
 const SystemConfig = require('../settings/systemConfig.model');
 const Mail = require('./mail.model');
 const User = require('../users/user.model');
+
+// Department est déjà enregistré dans Mongoose via department.routes au démarrage.
+// On récupère le modèle depuis le registre Mongoose plutôt que via require()
+// pour éviter tout couplage de chemin entre modules.
+const getDepartmentModel = () => mongoose.model('Department');
 const AppError = require('../../utils/AppError');
 const { STATUS_TRANSITIONS, MAIL_STATUS, ROLES, AUDIT_ACTIONS } = require('../../utils/constants');
 const { createAuditLog } = require('../../middlewares/audit.middleware');
@@ -68,7 +74,12 @@ const getAllMails = async (query, currentUser) => {
       { assignedTo: currentUser._id },
     ];
   } else if (currentUser.role === ROLES.SERVICE_LEAD) {
-    filter.assignedTo = currentUser._id;
+    // Un Service Lead voit les courriers qui lui sont assignés personnellement
+    // OU dont son département fait partie du dispatching
+    filter.$or = [
+      { assignedTo: currentUser._id },
+      { dispatchedTo: currentUser.departmentId },
+    ];
   }
 
   if (status) filter.status = status;
@@ -90,7 +101,7 @@ const getAllMails = async (query, currentUser) => {
   if (from || to) {
     filter.createdAt = {};
     if (from) filter.createdAt.$gte = new Date(from);
-    if (to) filter.createdAt.$lte = new Date(to);
+    if (to)   filter.createdAt.$lte = new Date(to);
   }
 
   const sort = { [sortBy]: sortOrder === 'asc' ? 1 : -1 };
@@ -139,7 +150,6 @@ const createMail = async (data, req) => {
   const referenceNumber = await generateReferenceNumber();
 
   // Keep manualReference as-is (optional, for administrative traceability)
-  // Both fields coexist independently on the document
   const manualReference =
     data.manualReference && data.manualReference.trim() !== ''
       ? data.manualReference.trim()
@@ -148,22 +158,22 @@ const createMail = async (data, req) => {
   const config = await SystemConfig.getConfig();
   const aiResult = await aiService.processNewMail(data, categoryMaxDays, config.globalTimeout);
   const mailData = {
-    subject:              data.subject,
-    sender:               data.sender,
-    type:                 data.type,
-    category:             data.category || null,
-    priority:             data.priority || 'Medium',
-    description:          data.description || null,
-    pdfUrl:               data.pdfUrl || null,
-    inboxMailId:          data.inboxMailId || null,
+    subject:               data.subject,
+    sender:                data.sender,
+    type:                  data.type,
+    category:              data.category || null,
+    priority:              data.priority || 'Medium',
+    description:           data.description || null,
+    pdfUrl:                data.pdfUrl || null,
+    inboxMailId:           data.inboxMailId || null,
     referenceNumber,
     manualReference,
     createdBy,
     status: MAIL_STATUS.REGISTERED,
-    aiSummary:            aiResult.aiSummary,
+    aiSummary:             aiResult.aiSummary,
     aiSuggestedDepartment: aiResult.aiSuggestedDepartment,
-    aiConfidenceScore:    aiResult.aiConfidenceScore,
-    slaDeadline:          aiResult.slaDeadline,
+    aiConfidenceScore:     aiResult.aiConfidenceScore,
+    slaDeadline:           aiResult.slaDeadline,
     statusHistory: [
       {
         status: MAIL_STATUS.REGISTERED,
@@ -179,11 +189,11 @@ const createMail = async (data, req) => {
   notifService.onMailRegistered(mail, req.user).catch(() => {});
 
   await createAuditLog({
-    userId: req.user._id,
+    userId:    req.user._id,
     userEmail: req.user.email,
-    action: AUDIT_ACTIONS.CREATE,
-    entity: 'Mail',
-    entityId: mail._id,
+    action:    AUDIT_ACTIONS.CREATE,
+    entity:    'Mail',
+    entityId:  mail._id,
     changes: {
       subject:         mail.subject,
       type:            mail.type,
@@ -248,21 +258,125 @@ const updateMailStatus = async (id, { status, note }, req) => {
   }
 
   await createAuditLog({
-    userId: req.user._id,
+    userId:    req.user._id,
     userEmail: req.user.email,
-    action: AUDIT_ACTIONS.STATUS_CHANGE,
-    entity: 'Mail',
-    entityId: id,
-    changes: { from: currentStatus, to: status, note },
+    action:    AUDIT_ACTIONS.STATUS_CHANGE,
+    entity:    'Mail',
+    entityId:  id,
+    changes:   { from: currentStatus, to: status, note },
     req,
   });
 
   return updated;
 };
 
+/**
+ * dispatchMail — Réservé au Directeur.
+ *
+ * Enregistre la liste des départements destinataires (`dispatchedTo`),
+ * les instructions optionnelles et la priorité, puis fait passer le statut
+ * de "Under Review" → "Assigned".
+ *
+ * Body attendu :
+ *   {
+ *     dispatchedTo:  ["<deptId1>", "<deptId2>", ...],  // tableau, min 1 élément
+ *     assignedTo:    "<userId>",                        // utilisateur principal (facultatif)
+ *     instructions:  "...",                             // texte libre (facultatif)
+ *     priority:      "High"                             // (facultatif)
+ *   }
+ */
+const dispatchMail = async (
+  id,
+  { dispatchedTo, assignedTo, instructions, priority },
+  req
+) => {
+  // ── 1. Récupération et vérifications préalables ───────────────────────────
+  const mail = await mailRepository.findById(id);
+  if (!mail) throw new AppError('Mail not found', 404);
+
+  if (mail.status !== MAIL_STATUS.UNDER_REVIEW) {
+    throw new AppError(
+      `Le courrier doit être en statut "Under Review" pour être dispatché. Statut actuel : "${mail.status}"`,
+      400
+    );
+  }
+
+  // ── 2. Validation du tableau dispatchedTo ─────────────────────────────────
+  if (!Array.isArray(dispatchedTo) || dispatchedTo.length === 0) {
+    throw new AppError('dispatchedTo doit être un tableau non vide d\'identifiants de départements', 400);
+  }
+
+  // Vérification de l'existence de chaque département
+  const Department = getDepartmentModel();
+  const departments = await Department.find({ _id: { $in: dispatchedTo } }).lean();
+  if (departments.length !== dispatchedTo.length) {
+    const foundIds = departments.map((d) => d._id.toString());
+    const missing  = dispatchedTo.filter((id) => !foundIds.includes(id.toString()));
+    throw new AppError(`Département(s) introuvable(s) : ${missing.join(', ')}`, 404);
+  }
+
+  // ── 3. Vérification de l'utilisateur assigné (facultatif) ────────────────
+  let assignee = null;
+  if (assignedTo) {
+    assignee = await User.findById(assignedTo);
+    if (!assignee) throw new AppError('Assigned user not found', 404);
+    if (!assignee.isActive) throw new AppError('Cannot assign to an inactive user', 400);
+  }
+
+  // ── 4. Construction du patch ──────────────────────────────────────────────
+  const deptNames = departments.map((d) => d.name).join(', ');
+
+  const updateData = {
+    dispatchedTo,
+    instructions: instructions || null,
+    status: MAIL_STATUS.ASSIGNED,
+    ...(assignedTo && { assignedTo }),
+    ...(priority   && { priority }),
+    $push: {
+      statusHistory: {
+        status:    MAIL_STATUS.ASSIGNED,
+        changedBy: req.user._id,
+        changedAt: new Date(),
+        note: `Dispatché vers : ${deptNames}${
+          assignee ? ` — responsable : ${assignee.name}` : ''
+        }${instructions ? ' (avec instructions)' : ''}`,
+      },
+    },
+  };
+
+  const updated = await mailRepository.update(id, updateData);
+
+  // ── 5. Notifications (non-bloquantes) ─────────────────────────────────────
+  if (assignee) {
+    notifService.onMailAssigned(mail, assignee._id, assignee.name, req.user).catch(() => {});
+  }
+
+  // ── 6. Audit log ──────────────────────────────────────────────────────────
+  await createAuditLog({
+    userId:    req.user._id,
+    userEmail: req.user.email,
+    action:    AUDIT_ACTIONS.ASSIGN,
+    entity:    'Mail',
+    entityId:  id,
+    changes: {
+      dispatchedTo: deptNames,
+      assignedTo:   assignee?.email || null,
+      instructions: instructions ? instructions.substring(0, 100) : '',
+    },
+    req,
+  });
+
+  return updated;
+};
+
+/**
+ * assignMail — Affectation à un utilisateur individuel (inchangé).
+ * Conservé pour les cas où le Directeur affecte à une personne précise
+ * sans passer par le dispatching multi-département.
+ */
 const assignMail = async (
   id,
-  { assignedTo, instructions, assignedDepartment, priority },
+  { assignedTo, instructions, dispatchedTo, priority },
   req
 ) => {
   const mail = await mailRepository.findById(id);
@@ -283,11 +397,12 @@ const assignMail = async (
     assignedTo,
     instructions: instructions || null,
     status: MAIL_STATUS.ASSIGNED,
-    ...(assignedDepartment && { assignedDepartment }),
     ...(priority && { priority }),
+    // Si des départements sont également passés ici, on les accepte
+    ...(Array.isArray(dispatchedTo) && dispatchedTo.length > 0 && { dispatchedTo }),
     $push: {
       statusHistory: {
-        status: MAIL_STATUS.ASSIGNED,
+        status:    MAIL_STATUS.ASSIGNED,
         changedBy: req.user._id,
         changedAt: new Date(),
         note: `Assigned to ${assignee.name}${instructions ? ' with instructions' : ''}`,
@@ -300,11 +415,11 @@ const assignMail = async (
   notifService.onMailAssigned(mail, assignee._id, assignee.name, req.user).catch(() => {});
 
   await createAuditLog({
-    userId: req.user._id,
+    userId:    req.user._id,
     userEmail: req.user.email,
-    action: AUDIT_ACTIONS.ASSIGN,
-    entity: 'Mail',
-    entityId: id,
+    action:    AUDIT_ACTIONS.ASSIGN,
+    entity:    'Mail',
+    entityId:  id,
     changes: {
       assignedTo:   assignee.email,
       instructions: instructions ? instructions.substring(0, 100) : '',
@@ -348,6 +463,7 @@ module.exports = {
   getMailById,
   createMail,
   updateMailStatus,
+  dispatchMail,
   assignMail,
   getMailsByUser,
   addComment,

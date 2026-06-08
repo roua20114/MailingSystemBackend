@@ -10,8 +10,6 @@ const createMailSchema = {
     description:     Joi.string().max(2000).optional().allow('', null),
     pdfUrl:          Joi.string().optional().allow('', null),
     inboxMailId:     Joi.string().hex().length(24).optional().allow(null, ''),
-    // Manual reference from the physical document (administrative traceability).
-    // The server ALWAYS also auto-generates its own referenceNumber (NM-YYYY-XXXX).
     manualReference: Joi.string().max(100).optional().allow('', null),
   }),
 };
@@ -28,12 +26,43 @@ const updateStatusSchema = {
   }),
 };
 
+/**
+ * dispatchMailSchema — Validation du dispatching multi-département.
+ *
+ * `dispatchedTo` est un tableau d'ObjectIds (min 1 entrée, max 20).
+ * Chaque élément est une chaîne hexadécimale de 24 caractères (ObjectId MongoDB).
+ */
+const dispatchMailSchema = {
+  body: Joi.object({
+    dispatchedTo: Joi.array()
+      .items(Joi.string().hex().length(24).required())
+      .min(1)
+      .max(20)
+      .required()
+      .messages({
+        'array.base':    'dispatchedTo doit être un tableau',
+        'array.min':     'Sélectionnez au moins un département',
+        'array.max':     'Maximum 20 départements par dispatching',
+        'any.required':  'dispatchedTo est obligatoire',
+      }),
+    assignedTo:   Joi.string().hex().length(24).optional().allow(null, ''),
+    instructions: Joi.string().max(2000).optional().allow('', null),
+    priority:     Joi.string().valid('Low', 'Medium', 'High', 'Urgent').optional(),
+  }),
+  params: Joi.object({
+    id: Joi.string().hex().length(24).required(),
+  }),
+};
+
 const assignMailSchema = {
   body: Joi.object({
-    assignedTo:         Joi.string().hex().length(24).required(),
-    instructions:       Joi.string().max(2000).optional().allow('', null),
-    assignedDepartment: Joi.string().hex().length(24).optional().allow(null, ''),
-    priority:           Joi.string().valid('Low', 'Medium', 'High', 'Urgent').optional(),
+    assignedTo:   Joi.string().hex().length(24).required(),
+    instructions: Joi.string().max(2000).optional().allow('', null),
+    // Permet de passer des départements en complément d'un assignee unique
+    dispatchedTo: Joi.array()
+      .items(Joi.string().hex().length(24))
+      .optional(),
+    priority:     Joi.string().valid('Low', 'Medium', 'High', 'Urgent').optional(),
   }),
   params: Joi.object({
     id: Joi.string().hex().length(24).required(),
@@ -79,6 +108,7 @@ const addCommentSchema = {
 module.exports = {
   createMailSchema,
   updateStatusSchema,
+  dispatchMailSchema,
   assignMailSchema,
   listMailSchema,
   mailIdParamSchema,

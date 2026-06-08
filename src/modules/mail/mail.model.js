@@ -40,11 +40,22 @@ const mailSchema = new mongoose.Schema(
       ref: 'User',
       default: null,
     },
-    assignedDepartment: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Department',
-      default: null,
+
+    // ── DISPATCHING MULTIPLE ───────────────────────────────────────────────────
+    // Remplace l'ancien champ scalaire `assignedDepartment`.
+    // Stocke la liste des départements/services ciblés par le Directeur lors du
+    // dispatching. Initialisé à [] pour éviter les null checks côté frontend.
+    dispatchedTo: {
+      type: [
+        {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'Department',
+        },
+      ],
+      default: [],
     },
+    // ──────────────────────────────────────────────────────────────────────────
+
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
@@ -138,6 +149,7 @@ mailSchema.index({ status: 1 });
 mailSchema.index({ type: 1 });
 mailSchema.index({ createdBy: 1 });
 mailSchema.index({ assignedTo: 1 });
+mailSchema.index({ dispatchedTo: 1 }); // index sur le tableau pour les requêtes de filtrage
 mailSchema.index({ inboxMailId: 1 });
 mailSchema.index({ manualReference: 1 });
 

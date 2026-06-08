@@ -10,6 +10,7 @@ const crypto = require('crypto');
 const {
   createMailSchema,
   updateStatusSchema,
+  dispatchMailSchema,
   assignMailSchema,
   listMailSchema,
   mailIdParamSchema,
@@ -56,6 +57,17 @@ router.put(
   mailController.updateMailStatus
 );
 
+// ── Dispatching multi-département (Directeur uniquement) ──────────────────────
+// PATCH /api/mails/:id/dispatch
+// Body : { dispatchedTo: ["<deptId1>", "<deptId2>"], assignedTo?, instructions?, priority? }
+router.patch(
+  '/:id/dispatch',
+  roleMiddleware(ROLES.DIRECTOR, ROLES.ADMIN),
+  validate(dispatchMailSchema),
+  mailController.dispatchMail
+);
+
+// ── Affectation individuelle (inchangée) ──────────────────────────────────────
 router.put(
   '/:id/assign',
   roleMiddleware(ROLES.DIRECTOR, ROLES.ADMIN),

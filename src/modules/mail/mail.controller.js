@@ -38,6 +38,28 @@ const updateMailStatus = async (req, res, next) => {
   }
 };
 
+/**
+ * dispatchMail — PATCH /api/mails/:id/dispatch
+ *
+ * Réservé au Directeur. Affecte le courrier à un ou plusieurs départements.
+ *
+ * Body attendu (JSON) :
+ * {
+ *   "dispatchedTo":  ["<deptId1>", "<deptId2>"],   // OBLIGATOIRE — tableau min 1
+ *   "assignedTo":    "<userId>",                     // facultatif
+ *   "instructions":  "Traiter avant le 15/07",       // facultatif
+ *   "priority":      "High"                          // facultatif
+ * }
+ */
+const dispatchMail = async (req, res, next) => {
+  try {
+    const mail = await mailService.dispatchMail(req.params.id, req.body, req);
+    sendSuccess(res, { mail }, 'Mail dispatched successfully');
+  } catch (error) {
+    next(error);
+  }
+};
+
 const assignMail = async (req, res, next) => {
   try {
     const mail = await mailService.assignMail(req.params.id, req.body, req);
@@ -100,6 +122,7 @@ module.exports = {
   getMailById,
   createMail,
   updateMailStatus,
+  dispatchMail,
   assignMail,
   getMailsByUser,
   addComment,

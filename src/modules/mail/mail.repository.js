@@ -8,11 +8,11 @@ const findAll = async ({ filter = {}, page = 1, limit = 10, sort = { createdAt: 
       .populate('sender', 'name type email phone')
       .populate('createdBy', 'name email role')
       .populate('assignedTo', 'name email role')
-      .populate('assignedDepartment', 'name')
+      // dispatchedTo est maintenant un tableau — populate fonctionne de façon identique
+      .populate('dispatchedTo', 'name description')
       .populate('category', 'name maxProcessingTime')
       .populate('statusHistory.changedBy', 'name email')
       .populate('inboxMailId', 'subject referenceNumber type status')
-      // Populate responses virtual so the list knows if a mail has been replied to
       .populate({
         path: 'responses',
         select: '_id subject referenceNumber type status createdAt',
@@ -23,7 +23,6 @@ const findAll = async ({ filter = {}, page = 1, limit = 10, sort = { createdAt: 
     Mail.countDocuments(filter),
   ]);
 
-  // Attach a computed boolean `hasResponse` on each mail for easy frontend use
   const mailsWithFlag = mails.map((mail) => {
     const obj = mail.toObject();
     obj.hasResponse = Array.isArray(obj.responses) && obj.responses.length > 0;
@@ -38,7 +37,7 @@ const findById = async (id) => {
     .populate('sender', 'name type email phone')
     .populate('createdBy', 'name email role')
     .populate('assignedTo', 'name email role departmentId')
-    .populate('assignedDepartment', 'name')
+    .populate('dispatchedTo', 'name description')
     .populate('category', 'name maxProcessingTime')
     .populate('statusHistory.changedBy', 'name email')
     .populate('inboxMailId', 'subject referenceNumber type status createdAt')
@@ -58,7 +57,7 @@ const update = async (id, data) => {
     .populate('sender', 'name type email phone')
     .populate('createdBy', 'name email role')
     .populate('assignedTo', 'name email role')
-    .populate('assignedDepartment', 'name')
+    .populate('dispatchedTo', 'name description')
     .populate('category', 'name maxProcessingTime')
     .populate('inboxMailId', 'subject referenceNumber type status');
 };
@@ -77,6 +76,7 @@ const findByUser = async (userId, { page = 1, limit = 10 }) => {
       .populate('sender', 'name type email phone')
       .populate('createdBy', 'name email')
       .populate('assignedTo', 'name email')
+      .populate('dispatchedTo', 'name description')
       .populate('category', 'name')
       .populate('inboxMailId', 'subject referenceNumber type status')
       .populate({ path: 'responses', select: '_id' })
