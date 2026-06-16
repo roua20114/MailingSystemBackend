@@ -90,14 +90,29 @@ const getAllMails = async (query, currentUser) => {
   if (category) filter.category = category;
   if (isOverdue !== undefined) filter.isOverdue = isOverdue;
 
+  // REPLACE the entire if (search) block with this:
   if (search) {
-    filter.$or = [
-      { subject:         { $regex: search, $options: 'i' } },
-      { referenceNumber: { $regex: search, $options: 'i' } },
-      { manualReference: { $regex: search, $options: 'i' } },
-    ];
-  }
+    const words = search.trim().split(/\s+/).filter(Boolean);
 
+    const buildWordCondition = (word) => ({
+      $or: [
+        { subject:         { $regex: word, $options: 'i' } },
+        { referenceNumber: { $regex: word, $options: 'i' } },
+        { manualReference: { $regex: word, $options: 'i' } },
+        { description:     { $regex: word, $options: 'i' } },
+        { instructions:    { $regex: word, $options: 'i' } },
+      ],
+    });
+
+    const wordConditions = words.map(buildWordCondition);
+
+    if (filter.$or) {
+      filter.$and = [{ $or: filter.$or }, ...wordConditions];
+      delete filter.$or;
+    } else {
+      filter.$and = wordConditions;
+    }
+  }
   if (from || to) {
     filter.createdAt = {};
     if (from) filter.createdAt.$gte = new Date(from);
@@ -227,9 +242,14 @@ const updateMailStatus = async (id, { status, note }, req) => {
     throw new AppError('Only a Director can move mail to Under Review', 403);
   }
 
+ // AFTER
   if (status === MAIL_STATUS.IN_PROGRESS) {
-    const isAssigned =
-      mail.assignedTo && mail.assignedTo._id.toString() === req.user._id.toString();
+    const assignedIds = Array.isArray(mail.assignedTo)
+      ? mail.assignedTo.map(u => u._id?.toString() ?? u.toString())
+      : mail.assignedTo
+        ? [mail.assignedTo._id?.toString() ?? mail.assignedTo.toString()]
+        : [];
+    const isAssigned = assignedIds.includes(req.user._id.toString());
     const isDirector = req.user.role === ROLES.DIRECTOR;
     const isAdmin    = req.user.role === ROLES.ADMIN;
     if (!isAssigned && !isDirector && !isAdmin) {
@@ -316,21 +336,23 @@ const dispatchMail = async (
   }
 
   // ── 3. Vérification de l'utilisateur assigné (facultatif) ────────────────
-  let assignee = null;
-  if (assignedTo) {
-    assignee = await User.findById(assignedTo);
-    if (!assignee) throw new AppError('Assigned user not found', 404);
-    if (!assignee.isActive) throw new AppError('Cannot assign to an inactive user', 400);
+ let assignees = [];
+  if (Array.isArray(assignedTo) && assignedTo.length > 0) {
+    assignees = await User.find({ _id: { $in: assignedTo }, isActive: true }).lean();
+    if (assignees.length !== assignedTo.length) {
+      throw new AppError('One or more assigned users not found or inactive', 404);
+    }
   }
 
   // ── 4. Construction du patch ──────────────────────────────────────────────
   const deptNames = departments.map((d) => d.name).join(', ');
+  const assigneeNames = assignees.map((u) => u.name).join(', ');
 
   const updateData = {
     dispatchedTo,
     instructions: instructions || null,
     status: MAIL_STATUS.ASSIGNED,
-    ...(assignedTo && { assignedTo }),
+    ...(assignees.length > 0 && { assignedTo: assignees.map(u => u._id) }),
     ...(priority   && { priority }),
     $push: {
       statusHistory: {
@@ -338,7 +360,7 @@ const dispatchMail = async (
         changedBy: req.user._id,
         changedAt: new Date(),
         note: `Dispatché vers : ${deptNames}${
-          assignee ? ` — responsable : ${assignee.name}` : ''
+          assigneeNames ? ` — responsables : ${assigneeNames}` : ''
         }${instructions ? ' (avec instructions)' : ''}`,
       },
     },
@@ -347,9 +369,9 @@ const dispatchMail = async (
   const updated = await mailRepository.update(id, updateData);
 
   // ── 5. Notifications (non-bloquantes) ─────────────────────────────────────
-  if (assignee) {
-    notifService.onMailAssigned(mail, assignee._id, assignee.name, req.user).catch(() => {});
-  }
+  assignees.forEach((u) => {
+    notifService.onMailAssigned(mail, u._id, u.name, req.user).catch(() => {});
+  });
 
   // ── 6. Audit log ──────────────────────────────────────────────────────────
   await createAuditLog({
@@ -360,7 +382,7 @@ const dispatchMail = async (
     entityId:  id,
     changes: {
       dispatchedTo: deptNames,
-      assignedTo:   assignee?.email || null,
+      assignedTo:   assignees.map((u) => u.email).join(', ') || null,
       instructions: instructions ? instructions.substring(0, 100) : '',
     },
     req,
@@ -458,6 +480,16 @@ const getMailStats = async () => {
   return result;
 };
 
+const markMail = async (id) => {
+  const mail = await mailRepository.findById(id);
+  if (!mail) throw new AppError('Mail not found', 404);
+  if (mail.isMarked) throw new AppError('Ce courrier est déjà marqué', 400);
+  return await mailRepository.update(id, { isMarked: true });
+};
+
+// add to exports:
+
+
 module.exports = {
   getAllMails,
   getMailById,
@@ -469,4 +501,5 @@ module.exports = {
   addComment,
   getComments,
   getMailStats,
+  markMail,
 };

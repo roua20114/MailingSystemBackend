@@ -36,9 +36,12 @@ const mailSchema = new mongoose.Schema(
       default: MAIL_STATUS.REGISTERED,
     },
     assignedTo: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-      default: null,
+        type: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+        default: [],
+    },
+    isMarked: {
+      type: Boolean,
+      default: false,
     },
 
     // ── DISPATCHING MULTIPLE ───────────────────────────────────────────────────
@@ -152,6 +155,8 @@ mailSchema.index({ assignedTo: 1 });
 mailSchema.index({ dispatchedTo: 1 }); // index sur le tableau pour les requêtes de filtrage
 mailSchema.index({ inboxMailId: 1 });
 mailSchema.index({ manualReference: 1 });
+// Add after the existing mailSchema.index() lines:
+
 
 const Mail = mongoose.model('Mail', mailSchema);
 

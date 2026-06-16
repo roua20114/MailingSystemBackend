@@ -45,7 +45,10 @@ const dispatchMailSchema = {
         'array.max':     'Maximum 20 départements par dispatching',
         'any.required':  'dispatchedTo est obligatoire',
       }),
-    assignedTo:   Joi.string().hex().length(24).optional().allow(null, ''),
+      assignedTo: Joi.array()
+        .items(Joi.string().hex().length(24).required())
+        .optional()
+        .allow(null),
     instructions: Joi.string().max(2000).optional().allow('', null),
     priority:     Joi.string().valid('Low', 'Medium', 'High', 'Urgent').optional(),
   }),

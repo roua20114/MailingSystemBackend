@@ -66,6 +66,12 @@ router.patch(
   validate(dispatchMailSchema),
   mailController.dispatchMail
 );
+// Add after the dispatch route:
+router.patch(
+  '/:id/mark',
+  validate(mailIdParamSchema),
+  mailController.markMail
+);
 
 // ── Affectation individuelle (inchangée) ──────────────────────────────────────
 router.put(

@@ -113,6 +113,25 @@ const summarizeMail = async (req, res, next) => {
     next(error);
   }
 };
+const markMail = async (req, res, next) => {
+  try {
+    const mail = await mailService.getMailById(req.params.id, req.user);
+    if (!mail) throw new Error('Mail not found');
+    if (mail.isMarked) {
+      return res.status(400).json({ success: false, message: 'Ce courrier est déjà marqué' });
+    }
+    // Use the generic updateStatus or a direct model update via mailService
+    const Mail = require('../mail/mail.model');
+    const updated = await Mail.findByIdAndUpdate(
+      req.params.id,
+      { isMarked: true },
+      { new: true }
+    );
+    res.json({ success: true, data: { mail: updated } });
+  } catch (err) {
+    next(err);
+  }
+};
 
 // Ajoute aussi dans module.exports :
 // summarizeMail,
@@ -129,4 +148,5 @@ module.exports = {
   getComments,
   getMailStats,
   summarizeMail,
+  markMail,
 };
