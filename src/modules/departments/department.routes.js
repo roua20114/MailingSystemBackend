@@ -15,21 +15,21 @@ router.get('/:id', validate(deptIdParamSchema), deptController.getDepartmentById
 router.post(
   '/',
   authMiddleware,
-  roleMiddleware(ROLES.ADMIN),
+  roleMiddleware(ROLES.ADMIN , ROLES.DIRECTOR),
   validate(createDepartmentSchema),
   deptController.createDepartment
 );
 router.put(
   '/:id',
   authMiddleware,
-  roleMiddleware(ROLES.ADMIN),
+  roleMiddleware(ROLES.ADMIN, ROLES.DIRECTOR),
   validate(updateDepartmentSchema),
   deptController.updateDepartment
 );
 router.delete(
   '/:id',
   authMiddleware,
-  roleMiddleware(ROLES.ADMIN),
+  roleMiddleware(ROLES.ADMIN, ROLES.DIRECTOR),
   validate(deptIdParamSchema),
   deptController.deleteDepartment
 );

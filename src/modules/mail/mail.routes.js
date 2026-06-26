@@ -118,5 +118,31 @@ router.post('/upload', roleMiddleware(ROLES.SECRETARY, ROLES.ADMIN, ROLES.DIRECT
     next(err);
   }
 });
+// Add a new route to attach additional PDF to existing mail:
+router.patch(
+  '/:id/attach-pdf',
+  authMiddleware,
+  async (req, res, next) => {
+    try {
+      const { pdfUrl } = req.body;
+      if (!pdfUrl) throw new AppError('pdfUrl is required', 400);
+      const existingUrls = existingMail.pdfUrls?.length > 0
+  ? existingMail.pdfUrls
+  : existingMail.pdfUrl ? [existingMail.pdfUrl] : [];
+
+// Only add if not already present
+if (!existingUrls.includes(pdfUrl)) {
+  existingUrls.push(pdfUrl);
+}
+      const mail = await Mail.findByIdAndUpdate(
+        req.params.id,
+        { $set: { pdfUrls: existingUrls }},
+        { new: true }
+      );
+      if (!mail) throw new AppError('Mail not found', 404);
+      res.json({ success: true, data: { mail } });
+    } catch (err) { next(err); }
+  }
+);
 
 module.exports = router;

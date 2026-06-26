@@ -6,6 +6,9 @@ const NOTIFICATION_TYPES = {
   MAIL_ASSIGNED:     'MAIL_ASSIGNED',      // Assignee: mail assigned to you
   MAIL_IN_PROGRESS:  'MAIL_IN_PROGRESS',   // Director/Admin + creator: assignee started
   MAIL_PROCESSED:    'MAIL_PROCESSED',     // Director/Admin + creator: mail fully treated
+  DEMAND_CREATED:    'DEMAND_CREATED',      // ← Admin notified: new demand from professor
+  DEMAND_FORWARDED:  'DEMAND_FORWARDED',    // ← Director notified: demand forwarded by admin
+  DEMAND_ANSWERED:   'DEMAND_ANSWERED',
 };
 
 const notificationSchema = new mongoose.Schema(

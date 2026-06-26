@@ -45,6 +45,13 @@ const AUDIT_ACTIONS = {
   ASSIGN: 'ASSIGN',
   STATUS_CHANGE: 'STATUS_CHANGE',
 };
+const DEMAND_STATUS = {
+  PENDING:     'Pending',
+  FORWARDED:   'Forwarded',
+  IN_PROGRESS: 'In Progress',
+  RESOLVED:    'Resolved',
+  REJECTED:    'Rejected',
+};
 
 module.exports = {
   ROLES,
@@ -53,4 +60,5 @@ module.exports = {
   MAIL_TYPES,
   MAIL_PRIORITY,
   AUDIT_ACTIONS,
+  DEMAND_STATUS
 };

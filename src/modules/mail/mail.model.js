@@ -74,6 +74,11 @@ const mailSchema = new mongoose.Schema(
       trim: true,
       default: null,
     },
+    pdfUrls: {
+      type: [String],
+      default: [],
+    },
+    
     description: {
       type: String,
       trim: true,

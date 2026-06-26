@@ -271,6 +271,88 @@ const onSlaAlert = async (mail, assigneeId) => {
   );
 };
 
+/**
+ * New demand created by professor → notify all Admins
+ */
+const onDemandCreated = async (demand, professor) => {
+  const admins = await User.find({ role: ROLES.ADMIN, isActive: true }).select('_id').lean();
+  const adminIds = admins.map(u => u._id);
+  if (adminIds.length === 0) return;
+
+  await send(
+    adminIds,
+    NOTIFICATION_TYPES.DEMAND_CREATED,
+    'Nouvelle demande professeur',
+    `${professor.name} a soumis une nouvelle demande : "${demand.subject}"`,
+    demand._id,
+    null,
+    (contact) => ({
+      subject: `[NexusMail] Nouvelle demande de ${professor.name}`,
+      html: `<p>Bonjour ${contact.name},</p>
+             <p><strong>${professor.name}</strong> a soumis une nouvelle demande.</p>
+             <p><strong>Type :</strong> ${demand.type}</p>
+             <p><strong>Objet :</strong> ${demand.subject}</p>
+             <p><strong>Description :</strong> ${demand.description}</p>
+             <p>Connectez-vous à NexusMail pour la traiter.</p>`,
+    })
+  );
+};
+
+/**
+ * Demand forwarded to director by admin → notify all Directors
+ */
+const onDemandForwarded = async (demand, professor, adminUser) => {
+  const directors = await User.find({ role: ROLES.DIRECTOR, isActive: true }).select('_id').lean();
+  const directorIds = directors.map(u => u._id);
+  if (directorIds.length === 0) return;
+
+  await send(
+    directorIds,
+    NOTIFICATION_TYPES.DEMAND_FORWARDED,
+    'Demande transmise par l\'administrateur',
+    `${adminUser.name} vous a transmis la demande de ${professor?.name ?? 'un professeur'} : "${demand.subject}"`,
+    demand._id,
+    null,
+    (contact) => ({
+      subject: `[NexusMail] Demande transmise — ${demand.subject}`,
+      html: `<p>Bonjour ${contact.name},</p>
+             <p><strong>${adminUser.name}</strong> vous a transmis une demande professeur.</p>
+             <p><strong>Professeur :</strong> ${professor?.name ?? '—'}</p>
+             <p><strong>Type :</strong> ${demand.type}</p>
+             <p><strong>Objet :</strong> ${demand.subject}</p>
+             <p>Connectez-vous à NexusMail pour y répondre.</p>`,
+    })
+  );
+};
+
+/**
+ * Director answered demand → notify the professor
+ */
+const onDemandAnswered = async (demand, professor, directorUser) => {
+  if (!professor?._id) return;
+  const isAccepted = demand.status === 'Resolved';
+
+  await send(
+    [professor._id],
+    NOTIFICATION_TYPES.DEMAND_ANSWERED,
+    isAccepted ? '✓ Votre demande a été acceptée' : '✗ Votre demande a été rejetée',
+    `Le Directeur ${directorUser.name} a ${isAccepted ? 'accepté' : 'rejeté'} votre demande : "${demand.subject}"`,
+    demand._id,
+    null,
+    (contact) => ({
+      subject: `[NexusMail] Réponse à votre demande — ${demand.subject}`,
+      html: `<p>Bonjour ${contact.name},</p>
+             <p>Le Directeur <strong>${directorUser.name}</strong> a 
+             <strong>${isAccepted ? 'accepté ✓' : 'rejeté ✗'}</strong> 
+             votre demande "<strong>${demand.subject}</strong>".</p>
+             ${demand.directorResponse
+               ? `<p><strong>Réponse :</strong> ${demand.directorResponse}</p>`
+               : ''}
+             <p>Connectez-vous à NexusMail pour consulter les détails.</p>`,
+    })
+  );
+};
+
 module.exports = {
   onMailRegistered,
   onMailUnderReview,
@@ -278,4 +360,7 @@ module.exports = {
   onMailInProgress,
   onMailProcessed,
   onSlaAlert,
+  onDemandCreated,
+  onDemandForwarded,
+  onDemandAnswered,
 };

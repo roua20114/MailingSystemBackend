@@ -7,6 +7,7 @@ const config = require('./config');
 const errorMiddleware = require('./middlewares/error.middleware');
 const logger = require('./utils/logger');
 const AppError = require('./utils/AppError');
+const demandRoutes = require('./modules/demands/demand.routes');
 
 // Route imports
 const authRoutes = require('./modules/auth/auth.routes');
@@ -67,8 +68,10 @@ const authLimiter = rateLimit({
 app.use('/api/auth/login', authLimiter);
 
 // ── Body Parsing ──────────────────────────────────────────────────────────────
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+// REVERT TO:
+app.use('/api/demands', demandRoutes);
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use('/uploads', express.static(require('path').join(__dirname, '../../uploads')));
 
 // ── HTTP Logging ──────────────────────────────────────────────────────────────
@@ -98,6 +101,7 @@ app.use('/api/mails', mailRoutes);
 app.use('/api', settingsRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/senders', senderRoutes);
+
 
 // ── 404 Handler ───────────────────────────────────────────────────────────────
 app.all('*', (req, res, next) => {

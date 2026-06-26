@@ -19,11 +19,14 @@ const generateRefreshToken = (userId) => {
 
 const register = async (userData, req) => {
   const existingUser = await User.findOne({ email: userData.email });
-  if (existingUser) {
-    throw new AppError('Email already in use', 409);
-  }
+  if (existingUser) throw new AppError('Email already in use', 409);
 
-  const user = await User.create(userData);
+  // Admin and Director accounts are active immediately
+  // All other roles require activation by Admin or Director
+  const privilegedRoles = ['Admin', 'Director'];
+  const isActive = privilegedRoles.includes(userData.role);
+
+  const user = await User.create({ ...userData, isActive });
 
   await createAuditLog({
     userId: user._id,
@@ -31,7 +34,7 @@ const register = async (userData, req) => {
     action: AUDIT_ACTIONS.CREATE,
     entity: 'User',
     entityId: user._id,
-    changes: { name: user.name, email: user.email, role: user.role },
+    changes: { name: user.name, email: user.email, role: user.role, isActive },
     req,
   });
 
@@ -46,7 +49,8 @@ const login = async (email, password, req) => {
   }
 
   if (!user.isActive) {
-    throw new AppError('Your account has been deactivated. Contact an administrator.', 401);
+    throw new AppError('Votre compte est en attente d\'activation. Veuillez contacter un administrateur ou le directeur.',
+    401);
   }
 
   const accessToken = generateAccessToken(user._id, user.role);

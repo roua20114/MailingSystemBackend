@@ -180,6 +180,7 @@ const createMail = async (data, req) => {
     priority:              data.priority || 'Medium',
     description:           data.description || null,
     pdfUrl:                data.pdfUrl || null,
+    pdfUrls:               data.pdfUrl ? [data.pdfUrl] : [],
     inboxMailId:           data.inboxMailId || null,
     referenceNumber,
     manualReference,
@@ -198,6 +199,7 @@ const createMail = async (data, req) => {
       },
     ],
   };
+
 
   const mail = await mailRepository.create(mailData);
 
